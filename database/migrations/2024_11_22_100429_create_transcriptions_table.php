@@ -15,6 +15,9 @@ class CreateTranscriptionsTable extends Migration
     {
         Schema::create('transcriptions', function (Blueprint $table) {
             $table->id();
+            $table->foreignId('conversation_id');
+            $table->string('audio_path');
+            $table->text('transcription');
             $table->timestamps();
         });
     }

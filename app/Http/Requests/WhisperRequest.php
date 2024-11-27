@@ -22,7 +22,8 @@ class WhisperRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'audio' => 'bail|required|file|max:10240',
+            'audio' => 'bail|required|max:10240',
+            'user_id' => 'bail|required|integer|exists:users,id',
         ];
     }
 }

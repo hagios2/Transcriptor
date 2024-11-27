@@ -3,10 +3,12 @@
 namespace App\Services;
 
 use App\Http\Requests\WhisperRequest;
-use FFMpeg\FFMpeg;
-use FFMpeg\Format\Audio\Mp3;
+use App\Models\Conversation;
+use App\Models\User;
 use GuzzleHttp\Client;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 
 class WhisperService
 {
@@ -15,64 +17,66 @@ class WhisperService
         $this->client = new Client(['base_uri' => 'https://api.openai.com/v1/']);
     }
 
-    public function transcribe(WhisperRequest $request)
+    public function transcribe(WhisperRequest $request): JsonResponse
     {
-        info('got hit in the service');
-        $audioFile = $request->file('audio');
-        $filePath = $audioFile->getPathname();
-        $convertedPath = storage_path('app/public/converted.mp3');
-
         try {
-              info('got hit in the try ' . $filePath);
-            FFMpeg::create([
-                'ffmpeg.binaries'  => '/opt/homebrew/bin/ffmpeg',
-                'ffprobe.binaries' => '/opt/homebrew/bin/ffprobe',
-            ])
-                ->open($filePath)
-                ->save(new Mp3(), $convertedPath);
+            $user = User::find($request->user_id);
+            $conversation = Conversation::query()->where('user_id', $user->id)->first();
 
-             info('after save and create');
-            // File conversion successful
-        } catch (\Exception $e) {
-            Log::error($e);
-            return response()->json(['error' => 'File conversion failed: ' . $e->getMessage()], 500);
+            if ($conversation) {
+                $conversation = $user->conversation()->create();
+            }
+
+            $audioFile = $request->file('audio');
+            $fileName = 'audios/' . $audioFile->getClientOriginalName();
+            $filePath = $audioFile->getPathname();
+
+            Storage::disk('local')
+                ->put("public/$fileName", file_get_contents($filePath), 'public');
+            $path = Storage::disk('local')->url($fileName);
+
+            $headers = [
+                'Authorization' => 'Bearer '. config('services.openai.key'),
+            ];
+
+            $multipart = [
+                [
+                    'name' => 'file',
+                    'contents' => fopen(public_path($path), 'r'),
+                    'filename' => $audioFile->getClientOriginalName(),
+                ],
+                [
+                    'name' => 'model',
+                    'contents' => 'whisper-1',
+                ],
+                [
+                    'name' => 'response_format',
+                    'contents' => 'text',
+                ],
+            ];
+
+            $response = $this->client->request('POST', 'audio/transcriptions', [
+                'multipart' => $multipart,
+                'headers' => $headers
+            ]);
+
+            $transcription = $response->getBody()->getContents();
+
+
+            $conversation->trancriptions()->create([
+                'audio_path' => $path,
+                'trancription' => $transcription
+            ]);
+
+            return response()->json([
+                'transcription' => $transcription,
+                'timestamp' => now()->format('M d, Y H:i a')
+            ]);
+        } catch (\Exception $exception) {
+              Log::error($exception);
+              return response()->json([
+                'error' => 'Failed to transcribe audio file',
+            ], 500);
         }
-
-
-        $headers = [
-            'Authorization' => 'Bearer '. config('services.openai.key'),
-//            'Content-Type' => 'multipart/form-data'
-        ];
-
-        info('file name: ' . $audioFile->getClientOriginalName() . ' and mime: ' . $audioFile->getClientMimeType());
-
-        $multipart = [
-            [
-                'name' => 'file',
-                'contents' => fopen($convertedPath, 'r'),
-//                'filename' => $audioFile->getClientOriginalName(),
-            ],
-            [
-                'name' => 'model',
-                'contents' => 'whisper-1',
-            ],
-            [
-                'name' => 'response_format',
-                'contents' => 'text',
-            ],
-        ];
-
-        $response = $this->client->request('POST', 'audio/transcriptions', [
-            'multipart' => $multipart,
-            'headers' => $headers
-        ]);
-
-        $response = json_decode($response->getBody()->getContents());
-
-        info('resp', (array)$response);
-
-        return response()->json([
-            'data' => $response,
-        ]);
     }
 }
