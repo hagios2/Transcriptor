@@ -20,15 +20,13 @@ class WhisperService
     public function transcribe(WhisperRequest $request): JsonResponse
     {
         try {
-            $user = User::find($request->user_id);
+            $user = User::find($request->user_id); // could be the $request->user-Id or auth()->id()
             $conversation = Conversation::query()->where('user_id', $user->id)->first();
-
-            if ($conversation) {
+            if (!$conversation) {
                 $conversation = $user->conversation()->create();
             }
-
             $audioFile = $request->file('audio');
-            $fileName = 'audios/' . $audioFile->getClientOriginalName();
+            $fileName = 'audios/' .   uniqid() . '_' .$audioFile->getClientOriginalName();
             $filePath = $audioFile->getPathname();
 
             Storage::disk('local')
@@ -61,11 +59,9 @@ class WhisperService
             ]);
 
             $transcription = $response->getBody()->getContents();
-
-
-            $conversation->trancriptions()->create([
+            $conversation->transcriptions()->create([
                 'audio_path' => $path,
-                'trancription' => $transcription
+                'transcription' => $transcription
             ]);
 
             return response()->json([
